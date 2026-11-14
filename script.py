@@ -2,26 +2,30 @@ import requests
 import pandas as pd
 import numpy as np
 
-# ==========================================================
-# TELEGRAM CONFIGURATION (Fill these when ready)
-# ==========================================================
-TELEGRAM_BOT_TOKEN = ""  # Paste token from @BotFather
-TELEGRAM_CHAT_ID = ""    # Paste your Chat ID
+# ==============================================================================
+# TELEGRAM CREDENTIALS
+# ==============================================================================
+TELEGRAM_BOT_TOKEN = "9154438361:AAG6UTmqiNeXJR4qWdEk73rm3xQct1_p-IU"
+TELEGRAM_CHAT_ID = "1392000132"
 
 def send_telegram_alert(message):
     """Sends automated trade alert directly to Telegram"""
-    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": message,
-            "parse_mode": "Markdown"
-        }
-        try:
-            requests.post(url, json=payload, timeout=5)
-            print("[ALERT] Telegram notification sent successfully!")
-        except Exception as e:
-            print(f"[ERROR] Failed to send Telegram alert: {e}")
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    try:
+        res = requests.post(url, json=payload, timeout=8)
+        if res.status_code == 200:
+            print("[TELEGRAM] Alert sent successfully to your phone!")
+        else:
+            print("[TELEGRAM] Note: Please open your bot in Telegram and press START so it can message you.")
+    except Exception as e:
+        print(f"[TELEGRAM ERROR] {e}")
 
 def calculate_max_pain(strikes, call_oi, put_oi):
     total_loss = {}
@@ -65,7 +69,7 @@ def fetch_stock_data(symbol, session, headers):
         df = pd.DataFrame({'strikePrice': strikes, 'callOI': call_oi, 'putOI': put_oi})
         return info['cmp'], df, True
 
-def scan_and_alert():
+def run_fno_scanner():
     fno_watchlist = ["RELIANCE", "TATAMOTORS", "SBIN", "INFY", "HDFCBANK", "ICICIBANK"]
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -77,9 +81,9 @@ def scan_and_alert():
     except Exception:
         pass
         
-    print("\n" + "=" * 75)
-    print(" SCANNING F&O CASH STOCKS WITH AUTO TELEGRAM ALERT SYSTEM")
-    print("=" * 75)
+    print("\n" + "=" * 78)
+    print(" F&O CASH STOCKS SCANNER (MAX PAIN & OPEN INTEREST STRATEGY)")
+    print("=" * 78)
     
     results = []
     buy_signals = []
@@ -93,14 +97,14 @@ def scan_and_alert():
         call_oi = df['callOI'].values
         put_oi = df['putOI'].values
         
-        max_call_oi = df.loc[df['callOI'].idxmax(), 'strikePrice']
-        max_put_oi = df.loc[df['putOI'].idxmax(), 'strikePrice']
-        max_pain = calculate_max_pain(strikes, call_oi, put_oi)
+        max_call_oi = int(df.loc[df['callOI'].idxmax(), 'strikePrice'])
+        max_put_oi = int(df.loc[df['putOI'].idxmax(), 'strikePrice'])
+        max_pain = int(calculate_max_pain(strikes, call_oi, put_oi))
         
         upside = ((max_pain - cmp) / cmp) * 100
         dist_support = ((cmp - max_put_oi) / cmp) * 100
         
-        # BUY Condition: Near Put Support (<2.5%) and at least 3.5% upside to Max Pain
+        # BUY Rule: Within 2.5% of Put Support AND Minimum 3.5% Upside to Max Pain
         if dist_support <= 2.5 and upside >= 3.5 and cmp < max_pain:
             status = "STRONG BUY"
             buy_signals.append({
@@ -111,12 +115,14 @@ def scan_and_alert():
                 "StopLoss": round(max_put_oi * 0.982, 1),
                 "Upside": f"+{round(upside, 1)}%"
             })
+        elif cmp >= max_call_oi or cmp >= max_pain:
+            status = "RESISTANCE / PROFIT"
         else:
             status = "WAIT / NEUTRAL"
             
         results.append({
             "Stock": symbol,
-            "CMP": cmp,
+            "CMP (Rs)": round(cmp, 1),
             "Support (PE)": max_put_oi,
             "Target (Pain)": max_pain,
             "Resist (CE)": max_call_oi,
@@ -124,11 +130,13 @@ def scan_and_alert():
             "Signal": status
         })
         
-    print(pd.DataFrame(results).to_string(index=False))
-    print("=" * 75)
+    df_results = pd.DataFrame(results)
+    print(df_results.to_string(index=False))
+    print("=" * 78)
     
-    # Process alerts
+    # Send Telegram alert if buy signals exist
     if buy_signals:
+        print(f"\n>>> Triggering Telegram Alerts for {len(buy_signals)} opportunities...")
         for b in buy_signals:
             msg = (
                 f"🚨 *NEW CASH SWING BUY SIGNAL* 🚨\n\n"
@@ -142,8 +150,9 @@ def scan_and_alert():
             )
             send_telegram_alert(msg)
     else:
-        print("No buy alerts triggered right now. Waiting for next market setup.")
-    print("=" * 75 + "\n")
+        print("\nAll stocks currently away from support. No alert sent.")
+        
+    print("=" * 78 + "\n")
 
 if __name__ == "__main__":
-    scan_and_alert()
+    run_fno_scanner()
